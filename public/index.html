@@ -1,0 +1,69 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+    <meta name="theme-color" content="#111318" />
+    <meta name="description" content="Listen together: a shared radio fed by everyone's queue." />
+    <title>Web Radio</title>
+    <link rel="manifest" href="/manifest.webmanifest" crossorigin="use-credentials" />
+    <link rel="icon" href="/icons/icon.svg" type="image/svg+xml" />
+    <link rel="apple-touch-icon" href="/icons/icon-192.png" />
+    <link rel="stylesheet" href="/style.css" />
+  </head>
+  <body>
+    <main class="app">
+      <header class="top">
+        <h1 id="station-name">Web Radio</h1>
+        <span class="pill" id="connection" data-state="connecting">connecting…</span>
+      </header>
+
+      <section class="now" aria-labelledby="now-title">
+        <div class="cover" id="cover">
+          <img id="cover-img" alt="" hidden />
+        </div>
+        <div class="now-text">
+          <p class="eyebrow">Now playing</p>
+          <h2 id="now-title">Nothing yet</h2>
+          <p class="sub" id="now-sub">Add a song below to get the radio going.</p>
+        </div>
+        <div class="progress" aria-hidden="true">
+          <div class="bar"><div class="fill" id="progress-fill"></div></div>
+          <div class="times"><span id="elapsed">0:00</span><span id="duration">0:00</span></div>
+        </div>
+        <div class="controls">
+          <button class="play" id="play" type="button" aria-label="Play">
+            <svg viewBox="0 0 24 24" class="icon-play"><path d="M8 5v14l11-7z" /></svg>
+            <svg viewBox="0 0 24 24" class="icon-pause"><path d="M6 5h4v14H6zM14 5h4v14h-4z" /></svg>
+          </button>
+          <button class="ghost" id="skip" type="button" aria-label="Skip for everyone" disabled>
+            <svg viewBox="0 0 24 24"><path d="M6 6l8.5 6L6 18zM16 6h2v12h-2z" /></svg>
+          </button>
+        </div>
+        <p class="sub center" id="listeners"></p>
+      </section>
+
+      <section class="add" aria-label="Add a song">
+        <form id="add-form">
+          <input id="url" name="url" type="url" inputmode="url" autocomplete="off" required
+                 placeholder="Paste a YouTube link" />
+          <button type="submit" id="add-btn">Add</button>
+        </form>
+        <label class="name">
+          <span>Your name</span>
+          <input id="name" type="text" maxlength="32" autocomplete="nickname" placeholder="optional" />
+        </label>
+        <p class="message" id="message" role="status"></p>
+      </section>
+
+      <section class="queue" aria-labelledby="queue-title">
+        <h3 id="queue-title">Up next <span id="queue-count"></span></h3>
+        <ol id="queue-list"></ol>
+        <p class="sub" id="queue-empty">The queue is empty.</p>
+      </section>
+    </main>
+
+    <audio id="audio" preload="none"></audio>
+    <script src="/app.js" type="module"></script>
+  </body>
+</html>

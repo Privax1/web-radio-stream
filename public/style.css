@@ -1,0 +1,142 @@
+:root {
+  --bg: #111318;
+  --surface: #1b1e25;
+  --surface-2: #252932;
+  --text: #eef0f4;
+  --muted: #9aa1ad;
+  --accent: #ff5a5f;
+  --accent-text: #fff;
+  --ok: #4cc38a;
+  --radius: 14px;
+  color-scheme: dark;
+}
+
+* { box-sizing: border-box; }
+
+html, body {
+  margin: 0;
+  background: var(--bg);
+  color: var(--text);
+  font: 16px/1.4 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  -webkit-tap-highlight-color: transparent;
+}
+
+.app {
+  max-width: 520px;
+  margin: 0 auto;
+  padding: max(16px, env(safe-area-inset-top)) 16px max(24px, env(safe-area-inset-bottom));
+  display: grid;
+  gap: 20px;
+}
+
+.top { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+.top h1 { font-size: 1.25rem; margin: 0; }
+
+.pill {
+  font-size: .75rem;
+  padding: 4px 10px;
+  border-radius: 999px;
+  background: var(--surface-2);
+  color: var(--muted);
+}
+.pill[data-state="live"] { color: var(--ok); }
+
+.now {
+  background: var(--surface);
+  border-radius: var(--radius);
+  padding: 16px;
+  display: grid;
+  gap: 14px;
+}
+
+.cover {
+  aspect-ratio: 16 / 9;
+  border-radius: 10px;
+  overflow: hidden;
+  background: linear-gradient(135deg, #2b2f3a, #1a1d24);
+}
+.cover img { width: 100%; height: 100%; object-fit: cover; display: block; }
+
+.eyebrow { margin: 0; font-size: .75rem; text-transform: uppercase; letter-spacing: .08em; color: var(--muted); }
+.now h2 { margin: 2px 0 0; font-size: 1.15rem; overflow-wrap: anywhere; }
+.sub { margin: 2px 0 0; color: var(--muted); font-size: .875rem; }
+.center { text-align: center; }
+
+.bar { height: 4px; background: var(--surface-2); border-radius: 2px; overflow: hidden; }
+.fill { height: 100%; width: 0; background: var(--accent); transition: width .5s linear; }
+.times { display: flex; justify-content: space-between; font-size: .75rem; color: var(--muted); margin-top: 4px; font-variant-numeric: tabular-nums; }
+
+.controls { display: flex; justify-content: center; align-items: center; gap: 20px; }
+
+button {
+  font: inherit;
+  border: 0;
+  cursor: pointer;
+  color: inherit;
+  background: none;
+}
+button:disabled { opacity: .35; cursor: default; }
+button svg { width: 28px; height: 28px; fill: currentColor; display: block; }
+
+.play {
+  width: 68px; height: 68px;
+  border-radius: 50%;
+  background: var(--accent);
+  color: var(--accent-text);
+  display: grid; place-items: center;
+}
+.play svg { width: 34px; height: 34px; }
+.play .icon-pause, .play.playing .icon-play { display: none; }
+.play.playing .icon-pause { display: block; }
+
+.ghost { width: 48px; height: 48px; border-radius: 50%; display: grid; place-items: center; background: var(--surface-2); }
+
+.add form { display: flex; gap: 8px; }
+
+input {
+  font: inherit;
+  color: var(--text);
+  background: var(--surface);
+  border: 1px solid var(--surface-2);
+  border-radius: 10px;
+  padding: 12px;
+  min-width: 0;
+}
+input:focus { outline: 2px solid var(--accent); outline-offset: 0; }
+.add form input { flex: 1; }
+.add form button {
+  padding: 0 18px;
+  border-radius: 10px;
+  background: var(--accent);
+  color: var(--accent-text);
+  font-weight: 600;
+}
+
+.name { display: flex; align-items: center; gap: 10px; margin-top: 10px; font-size: .875rem; color: var(--muted); }
+.name input { flex: 1; padding: 8px 10px; }
+
+.message { min-height: 1.2em; margin: 8px 0 0; font-size: .875rem; color: var(--muted); }
+.message.error { color: var(--accent); }
+
+.queue h3 { margin: 0 0 8px; font-size: 1rem; }
+.queue h3 span { color: var(--muted); font-weight: normal; }
+.queue ol { list-style: none; margin: 0; padding: 0; display: grid; gap: 8px; }
+.queue li {
+  display: grid;
+  grid-template-columns: 64px 1fr auto;
+  gap: 12px;
+  align-items: center;
+  background: var(--surface);
+  border-radius: 10px;
+  padding: 8px;
+}
+.queue li img, .queue li .thumb {
+  width: 64px; height: 36px;
+  border-radius: 6px;
+  object-fit: cover;
+  background: var(--surface-2);
+}
+.queue .title { font-size: .9rem; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.queue .meta { font-size: .75rem; color: var(--muted); }
+.queue .remove { width: 36px; height: 36px; border-radius: 50%; color: var(--muted); }
+.queue .remove svg { width: 20px; height: 20px; }

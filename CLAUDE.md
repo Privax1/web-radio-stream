@@ -1,0 +1,116 @@
+# CLAUDE.md
+
+This file guides Claude Code (claude.ai/code) when working in this repository.
+
+## What this is
+
+A self-hosted "shared radio". Anyone with the link can queue YouTube videos. The server
+downloads the audio and broadcasts one continuous live MP3 stream, so every listener hears
+the same position. The frontend is an installable PWA. It uses a plain `<audio>` element plus
+the Media Session API, so on Android it behaves like a music app: it keeps playing in the
+background and shows notification and lock-screen controls.
+
+## Commands
+
+```bash
+npm install            # deps (only express)
+npm run dev            # node --watch; needs ffmpeg + yt-dlp on PATH locally
+npm test               # node:test unit tests (test/*.test.js)
+docker compose up -d --build   # the normal way to run it
+docker compose build --pull --no-cache   # also updates yt-dlp (do this when YouTube breaks)
+```
+
+The local dev server listens on http://localhost:3000. For the PWA, service worker and Media
+Session you need `localhost` or HTTPS.
+
+## Stack
+
+- Node.js 22, ES modules, **no build step and no TypeScript**. Types are documented with JSDoc where useful.
+- Express 5 is the only runtime dependency. Keep it that way unless there is a strong reason.
+- External binaries: `yt-dlp` (metadata + audio download) and `ffmpeg` (real-time MP3 encoding).
+  Both are installed in the Docker image. In Docker, yt-dlp uses Node as its JS runtime
+  (`YTDLP_EXTRA_ARGS="--js-runtimes node"`), which YouTube extraction requires.
+- The frontend is vanilla JS/HTML/CSS in `public/`, served statically. No framework, no bundler.
+
+## Architecture
+
+```
+server/
+  index.js        HTTP routes, SSE fan-out, optional basic auth, startup/shutdown
+  config.js       all env-var config (single source of truth)
+  station.js      orchestrator: download worker + play loop + public state()
+  broadcaster.js  one ffmpeg "source" at a time -> fanned out to all /stream listeners
+  queue.js        in-memory ordered track list (pure, unit-tested)
+  ytdlp.js        yt-dlp wrapper (fetchInfo, downloadAudio)
+  validate.js     URL / name validation (pure, unit-tested)
+public/
+  index.html, style.css, app.js   the whole UI
+  sw.js                           app-shell cache (network-first)
+  manifest.webmanifest, icons/    PWA install + Android share target
+```
+
+Flow:
+1. `POST /api/queue {url, name}` validates the URL (domain allowlist), runs `yt-dlp -J` for
+   title/duration, and appends a `pending` track.
+2. `Station#downloadNext` downloads queued tracks **one at a time** to `DATA_DIR/cache/<id>.<ext>`
+   (`pending → downloading → ready`). Failed downloads are dropped from the queue.
+3. `Station#loop` takes the first `ready` track and calls `broadcaster.playFile()`
+   (`ffmpeg -re … -f mp3 pipe:1`). When nothing is ready it streams silence
+   (`anullsrc`) until a track becomes ready. Finished files are deleted.
+4. `Broadcaster` writes each ffmpeg chunk to every `/stream` response. It keeps the last
+   `BURST_SECONDS` of audio to send to new listeners so playback starts instantly. Listeners
+   more than 1 MB behind (paused or dead) are disconnected.
+5. `GET /api/events` (SSE) pushes the full `station.state()` on every change. Changes are
+   coalesced per tick. The client renders only from this state.
+
+HTTP API: `GET /stream`, `GET /api/state`, `GET /api/events`, `POST /api/queue`,
+`DELETE /api/queue/:id`, `POST /api/skip {id}`, `GET /healthz` (unauthenticated).
+
+## Design decisions (don't undo without discussing)
+
+- **Radio semantics.** Skip is global. It takes the current track `id` so two simultaneous
+  skips don't skip two songs. Pause is per listener: resuming sets a fresh `src`, so the
+  listener rejoins live instead of falling behind.
+- **One continuous stream, not per-track files.** This is what keeps Android background
+  playback and the media notification alive across track changes. Silence between tracks
+  is intentional. ffmpeg runs with `-write_xing 0 -id3v2_version 0` so concatenated
+  sources stay a valid MP3 stream.
+- **The client never changes `src` on track change.** Track metadata comes via SSE and is
+  shown `liveDelayMs` late while listening, so the lock screen matches what you hear.
+- **`pause()` keeps the `src`.** Removing it would make Android drop the notification and
+  its play button.
+- **The service worker must never intercept `/stream` or `/api/*`.**
+- **State is in memory.** A restart clears the queue, and the cache dir is wiped on boot.
+  That is acceptable for the MVP. If persistence is added, store the queue as JSON in `DATA_DIR`.
+- **Security:** URLs go to yt-dlp after `--` (no option injection) and must match
+  `ALLOWED_DOMAINS` (default: YouTube only; `*` opens it up, which allows yt-dlp to fetch
+  arbitrary hosts and is an SSRF risk). `APP_PASSWORD` enables HTTP Basic auth for
+  everything except `/healthz`. The manifest link uses `crossorigin="use-credentials"` so
+  this works with the PWA.
+
+## Configuration (env)
+
+`PORT` (3000), `STATION_NAME`, `APP_PASSWORD`, `DATA_DIR` (./data, /data in Docker),
+`BITRATE_KBPS` (128), `BURST_SECONDS` (2), `MAX_QUEUE_LENGTH` (100),
+`MAX_TRACK_SECONDS` (1800), `ALLOWED_DOMAINS` (youtube.com,youtu.be), `FFMPEG_BIN`,
+`YTDLP_BIN`, `YTDLP_EXTRA_ARGS`. Add new settings to `server/config.js`, to the
+commented list in `docker-compose.yml` and to this file.
+
+## Conventions
+
+- Keep modules small and dependency-free. Pure logic (queue, validation) gets unit tests in `test/`.
+- User-facing errors: throw `ValidationError` (→ 400 with `{error}`). Anything else is logged and returns a 500.
+- Logs use a `[area]` prefix (`[station]`, `[api]`, `[ffmpeg]`, `[yt-dlp]`).
+- Frontend: build DOM with `textContent` (never `innerHTML` with server data). Wrap
+  `localStorage` in try/catch. When you change cached shell files in a way that needs a
+  hard refresh, bump `CACHE` in `public/sw.js`.
+- Verify streaming changes end to end: `docker compose up -d --build`, queue a short video
+  (e.g. `https://youtu.be/jNQXAC9IVRw`), then `curl localhost:3000/stream -o x.mp3` and listen.
+
+## Deployment notes
+
+- Production needs HTTPS (service worker, PWA install and Media Session require it). Put a
+  reverse proxy in front and **disable response buffering** for `/stream` and `/api/events`.
+  For nginx use `proxy_buffering off;`; the server also sends `X-Accel-Buffering: no`.
+  For Caddy use `reverse_proxy radio:3000 { flush_interval -1 }`.
+- Disk use: only queued tracks are cached, roughly 1 MB per minute of audio.

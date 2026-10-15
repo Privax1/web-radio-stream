@@ -1,0 +1,21 @@
+services:
+  radio:
+    build: .
+    image: web-radio-stream
+    init: true
+    restart: unless-stopped
+    ports:
+      - "3000:3000"
+    environment:
+      STATION_NAME: "Web Radio"
+      # Shared password for the whole site (HTTP Basic auth, any username). Empty = open.
+      APP_PASSWORD: ""
+      # BITRATE_KBPS: "128"
+      # MAX_TRACK_SECONDS: "1800"
+      # MAX_QUEUE_LENGTH: "100"
+      # ALLOWED_DOMAINS: "youtube.com,youtu.be"   # "*" = anything yt-dlp supports
+    volumes:
+      - radio-cache:/data
+
+volumes:
+  radio-cache:
