@@ -43,6 +43,7 @@ server/
   queue.js        in-memory ordered track list (pure, unit-tested)
   ytdlp.js        yt-dlp wrapper (fetchInfo, downloadAudio)
   validate.js     URL / name validation (pure, unit-tested)
+  mp3.js          MP3 frame splitter used for frame-aligned pacing (pure, unit-tested)
 public/
   index.html, style.css, app.js   the whole UI
   sw.js                           app-shell cache (network-first)
@@ -55,22 +56,29 @@ Flow:
 2. `Station#downloadNext` downloads queued tracks **one at a time** to `DATA_DIR/cache/<id>.<ext>`
    (`pending → downloading → ready`). Failed downloads are dropped from the queue.
 3. `Station#loop` takes the first `ready` track and `#playTrack` calls
-   `broadcaster.playFile(file, offset)` (`ffmpeg -re [-ss offset] … -f mp3 pipe:1`). When
+   `broadcaster.playFile(file, offset)` (`ffmpeg [-ss offset] … -f mp3 pipe:1`). When
    nothing is ready, or while the station is paused, it streams silence (`anullsrc`) via
    `#silenceUntil(predicate)`. The predicate is re-checked on every station `'change'`.
    Finished files are deleted.
-   Station controls (`skip`, `seek`, `pause`, `resume`) set a flag and stop the current
-   ffmpeg source. `#playTrack` then reads the flag to decide what to stream next: a restart
-   at a new offset, silence, or the next track. The file stays cached until the track
-   really ends.
-4. `Broadcaster` writes each ffmpeg chunk to every `/stream` response. It keeps the last
+   Station controls (`skip`, `seek`, `pause`, `resume`) set a flag and call `#cut()`. That
+   cuts the broadcaster and bumps `epoch`. `#playTrack` then reads the flag to decide what to
+   stream next: a restart at a new offset, silence, or the next track. The file stays
+   cached until the track really ends.
+4. `Broadcaster` paces audio itself. ffmpeg encodes ahead with no `-re`, limited by pipe
+   backpressure. `server/mp3.js` splits the output into whole MP3 frames, and `#pace()`
+   releases them at exactly the CBR bitrate to every `/stream` response. It keeps the last
    `BURST_SECONDS` of audio to send to new listeners so playback starts instantly. Listeners
    more than 1 MB behind (paused or dead) are disconnected.
+   `cut()` drops the current source and the replay buffer, and gives the **next** source a
+   lead: its first `BURST_SECONDS` are sent at once. `sourceLeadSeconds` exposes the lead so
+   the station can shift `startedAt`.
 5. `GET /api/events` (SSE) pushes the full `station.state()` on every change. Changes are
    coalesced per tick. The client renders only from this state.
 
-`nowPlaying` timing: `startedAt` is the server time at which position 0 would have played,
-so the current position is `serverTime - startedAt`. While paused, `startedAt` is `null`
+`nowPlaying` timing: `startedAt` is the server time at which position 0 would have been at
+the **live edge** (the last bytes sent), so the live position is `serverTime - startedAt`.
+Listeners hear that minus their buffer. The client measures the buffer as
+`audio.buffered.end - currentTime` (`streamLagMs()`). While paused, `startedAt` is `null`
 and `position` is frozen. Clients correct for clock skew with `serverTime`.
 
 HTTP API: `GET /stream`, `GET /api/state`, `GET /api/events`, `POST /api/queue`,
@@ -95,15 +103,20 @@ HTTP API: `GET /stream`, `GET /api/state`, `GET /api/events`, `POST /api/queue`,
   keeps streaming silence, so listeners stay connected. While paused, the client reports
   `mediaSession.playbackState = 'paused'`. Never pass `playbackRate: 0` to
   `setPositionState`, because it throws.
-- **Controls take effect about `liveDelayMs` late** for listeners. That's the client buffer.
-  The UI delays its own updates (track, seek, pause) by the same amount instead of
-  flushing the buffer.
+- **Controls are instant via reconnect.** On an `epoch` change, listening clients call
+  `play()`, which sets a fresh `src`. This drops their ~1-2 s of buffered old audio. With
+  the lead from `cut()`, the new audio starts in about 100-200 ms (measured: pause 70 ms,
+  resume 200 ms, versus about 2.3 s before). A pause resumes `liveDelayMs` before the live
+  edge, because listeners discard what they hadn't heard yet. That can repeat a moment of
+  audio but never skips any. Don't put `-re` back in ffmpeg, and don't slice MP3 frames:
+  Chrome needs about 6 s to detect a stream that starts mid-frame.
 - **One continuous stream, not per-track files.** This is what keeps Android background
   playback and the media notification alive across track changes. Silence between tracks
   is intentional. ffmpeg runs with `-write_xing 0 -id3v2_version 0` so concatenated
   sources stay a valid MP3 stream.
-- **The client never changes `src` on track change.** Track metadata comes via SSE and is
-  shown `liveDelayMs` late while listening, so the lock screen matches what you hear.
+- **The client never changes `src` on a natural track change.** Only controls (an `epoch`
+  bump) trigger a reconnect. Track metadata comes via SSE and is shown `streamLagMs()` late
+  while listening, so the lock screen matches what you hear.
 - **`pause()` keeps the `src`.** Removing it would make Android drop the notification and
   its play button.
 - **The service worker must never intercept `/stream` or `/api/*`.**

@@ -25,6 +25,11 @@ class FakeBroadcaster extends EventEmitter {
   closeAll() {
     this.stop();
   }
+  cut() {
+    this.stop();
+    this.cuts = (this.cuts ?? 0) + 1;
+  }
+  sourceLeadSeconds = 0;
   get last() {
     return this.calls.at(-1);
   }
@@ -149,6 +154,27 @@ test('a paused station does not start the next track', async (t) => {
   station.resume();
   await settle();
   assert.equal(station.state().nowPlaying.title, 'B');
+});
+
+test('audible controls start a new epoch and cut the stream; a paused seek does not', async (t) => {
+  const { broadcaster, station, track } = await setup();
+  t.after(() => station.stop());
+  const epoch = () => station.state().epoch;
+  const start = epoch();
+
+  station.seek(track.id, 10);
+  assert.equal(epoch(), start + 1);
+  station.pause();
+  assert.equal(epoch(), start + 2);
+  await settle();
+  station.seek(track.id, 20); // nothing audible changes while paused
+  assert.equal(epoch(), start + 2);
+  station.resume();
+  assert.equal(epoch(), start + 3);
+  await settle();
+  station.skip(track.id);
+  assert.equal(epoch(), start + 4);
+  assert.equal(broadcaster.cuts, 4);
 });
 
 test('a finished track moves on to the next one', async (t) => {

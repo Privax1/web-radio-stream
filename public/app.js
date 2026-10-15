@@ -47,7 +47,12 @@ function setConnection(kind, label) {
 
 function applyState(next) {
   const first = state === null;
+  const newEpoch = !first && next.epoch !== state.epoch;
   state = next;
+
+  // Someone skipped, seeked, paused or resumed the station. Reconnect so we drop the ~1-2s
+  // of old audio still buffered here and hear the change right away.
+  if (newEpoch && wantPlaying) play();
   clockOffset = next.serverTime - Date.now();
 
   document.title = next.stationName;
@@ -57,14 +62,15 @@ function applyState(next) {
   renderQueue(next.queue);
   renderHost();
 
-  // While listening, audio reaches us ~liveDelayMs after the server sends it. Delay track
-  // changes, seeks and pauses by the same amount so the screen matches what you hear.
+  // While listening, we hear audio streamLagMs() after the server sends it. Delay natural
+  // track changes by the same amount so the screen matches what you hear. (Controls
+  // reconnect the stream, so their effect is immediate.)
   const np = next.nowPlaying;
   const key = np ? `${np.id}|${np.startedAt}|${np.position}` : null;
   if (key !== shownKey) {
     shownKey = key;
     clearTimeout(nowPlayingTimer);
-    const delay = first || !wantPlaying ? 0 : next.liveDelayMs;
+    const delay = first || newEpoch ? 0 : streamLagMs();
     nowPlayingTimer = setTimeout(() => setNowPlaying(np), delay);
   }
   updateControls();
@@ -105,11 +111,20 @@ function setNowPlaying(track) {
   updatePositionState();
 }
 
+/**
+ * How far behind the live broadcast this listener hears, in ms: the audio buffered ahead of
+ * the playhead. Measured instead of assumed, because it shrinks after a reconnect.
+ */
+function streamLagMs() {
+  const buffered = audio.buffered;
+  if (!wantPlaying || buffered.length === 0) return 0;
+  return Math.max(0, (buffered.end(buffered.length - 1) - audio.currentTime) * 1000);
+}
+
 /** Position in seconds of what this listener hears right now. */
 function elapsedSeconds(track) {
   if (track.startedAt === null) return track.position; // station paused
-  const lag = wantPlaying ? state.liveDelayMs : 0;
-  const ms = Date.now() + clockOffset - track.startedAt - lag;
+  const ms = Date.now() + clockOffset - track.startedAt - streamLagMs();
   return Math.min(Math.max(ms / 1000, 0), track.duration);
 }
 

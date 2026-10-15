@@ -26,8 +26,8 @@ prefill it.
 | Volume slider / mute | Only affects you. Remembered on your device (not supported on iOS). |
 | ✕ on a queued song | Removes it from the queue. |
 
-Everyone hears changes about 2 seconds after they're made, because that's the size of the
-stream buffer.
+Station-wide changes (skip, seek, host pause and resume) are heard by everyone almost
+immediately.
 
 ### Host mode
 
@@ -54,7 +54,7 @@ Set these in `docker-compose.yml`:
 | `BITRATE_KBPS` | `128` | Stream bitrate |
 | `MAX_TRACK_SECONDS` | `1800` | Longest allowed track |
 | `MAX_QUEUE_LENGTH` | `100` | |
-| `BURST_SECONDS` | `2` | Startup buffer for new listeners (also their delay behind live) |
+| `BURST_SECONDS` | `2` | Audio sent at once when someone joins or after skip, seek or pause, so playback starts instantly |
 
 ## HTTPS / reverse proxy
 

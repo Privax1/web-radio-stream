@@ -19,6 +19,12 @@ export class Station extends EventEmitter {
    */
   current = null;
   paused = false;
+  /**
+   * Bumped by every control that changes what is audible (skip, seek, pause, resume).
+   * Listening clients reconnect when it changes, dropping their ~2s of buffered old audio,
+   * so controls are heard almost immediately instead of after the buffer plays out.
+   */
+  epoch = 0;
   #downloading = false;
   #running = false;
   #skipRequested = false;
@@ -64,7 +70,7 @@ export class Station extends EventEmitter {
     if (!this.#isCurrent(expectedId)) return false;
     console.log(`[station] skipped "${this.current.title}"`);
     this.#skipRequested = true;
-    this.broadcaster.stop();
+    this.#cut();
     return true;
   }
 
@@ -77,7 +83,7 @@ export class Station extends EventEmitter {
       this.emit('change');
     } else {
       this.#seekTo = position;
-      this.broadcaster.stop();
+      this.#cut();
     }
     return true;
   }
@@ -87,8 +93,7 @@ export class Station extends EventEmitter {
     if (this.paused) return false;
     this.paused = true;
     console.log('[station] paused');
-    if (this.current) this.broadcaster.stop();
-    this.emit('change');
+    this.#cut();
     return true;
   }
 
@@ -96,7 +101,7 @@ export class Station extends EventEmitter {
     if (!this.paused) return false;
     this.paused = false;
     console.log('[station] resumed');
-    this.emit('change'); // ends the paused silence, see #silenceUntil
+    this.#cut();
     return true;
   }
 
@@ -125,9 +130,21 @@ export class Station extends EventEmitter {
       liveDelayMs: this.liveDelayMs,
       listeners: this.broadcaster.listenerCount,
       paused: this.paused,
+      epoch: this.epoch,
       nowPlaying: now ? { ...pub(now), startedAt: now.startedAt, position: now.position } : null,
       queue: this.queue.tracks.map(pub),
     };
+  }
+
+  /**
+   * Ends the current source right now and starts a new epoch. The play loop then starts
+   * whatever comes next (new offset, silence or next track). Clearing the burst ensures
+   * reconnecting clients get none of the old audio.
+   */
+  #cut() {
+    this.broadcaster.cut();
+    this.epoch++;
+    this.emit('change');
   }
 
   #isCurrent(expectedId) {
@@ -170,12 +187,15 @@ export class Station extends EventEmitter {
         continue;
       }
 
-      const startedAt = Date.now() - position * 1000;
+      const sourceStart = Date.now();
+      const playing = this.broadcaster.playFile(track.file, position);
+      // After a cut the source starts with a lead (sent ahead of real time), so the live
+      // edge is that much further into the track.
+      const startedAt = sourceStart - (position + this.broadcaster.sourceLeadSeconds) * 1000;
       this.current = { ...track, startedAt, position };
       this.emit('change');
 
-      const sourceStart = Date.now();
-      const { code, signal } = await this.broadcaster.playFile(track.file, position);
+      const { code, signal } = await playing;
 
       if (this.#skipRequested) break;
       if (this.#seekTo !== null) {
@@ -184,7 +204,10 @@ export class Station extends EventEmitter {
         continue;
       }
       if (this.paused) {
-        position = Math.min((Date.now() - startedAt) / 1000, track.duration);
+        // Listeners are up to liveDelayMs behind the live edge and drop that buffer when
+        // they reconnect, so resume from there: may repeat a moment, never skips audio.
+        const heard = (Date.now() - startedAt - this.liveDelayMs) / 1000;
+        position = Math.min(Math.max(heard, position), track.duration);
         continue;
       }
       if (code !== 0 && !signal) {
