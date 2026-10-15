@@ -2,7 +2,7 @@
 // The live stream and the API are never touched; intercepting /stream would break
 // background playback.
 
-const CACHE = 'shell-v1';
+const CACHE = 'shell-v3';
 const SHELL = [
   '/',
   '/app.js',

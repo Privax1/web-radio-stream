@@ -54,23 +54,50 @@ Flow:
    title/duration, and appends a `pending` track.
 2. `Station#downloadNext` downloads queued tracks **one at a time** to `DATA_DIR/cache/<id>.<ext>`
    (`pending → downloading → ready`). Failed downloads are dropped from the queue.
-3. `Station#loop` takes the first `ready` track and calls `broadcaster.playFile()`
-   (`ffmpeg -re … -f mp3 pipe:1`). When nothing is ready it streams silence
-   (`anullsrc`) until a track becomes ready. Finished files are deleted.
+3. `Station#loop` takes the first `ready` track and `#playTrack` calls
+   `broadcaster.playFile(file, offset)` (`ffmpeg -re [-ss offset] … -f mp3 pipe:1`). When
+   nothing is ready, or while the station is paused, it streams silence (`anullsrc`) via
+   `#silenceUntil(predicate)`. The predicate is re-checked on every station `'change'`.
+   Finished files are deleted.
+   Station controls (`skip`, `seek`, `pause`, `resume`) set a flag and stop the current
+   ffmpeg source. `#playTrack` then reads the flag to decide what to stream next: a restart
+   at a new offset, silence, or the next track. The file stays cached until the track
+   really ends.
 4. `Broadcaster` writes each ffmpeg chunk to every `/stream` response. It keeps the last
    `BURST_SECONDS` of audio to send to new listeners so playback starts instantly. Listeners
    more than 1 MB behind (paused or dead) are disconnected.
 5. `GET /api/events` (SSE) pushes the full `station.state()` on every change. Changes are
    coalesced per tick. The client renders only from this state.
 
+`nowPlaying` timing: `startedAt` is the server time at which position 0 would have played,
+so the current position is `serverTime - startedAt`. While paused, `startedAt` is `null`
+and `position` is frozen. Clients correct for clock skew with `serverTime`.
+
 HTTP API: `GET /stream`, `GET /api/state`, `GET /api/events`, `POST /api/queue`,
-`DELETE /api/queue/:id`, `POST /api/skip {id}`, `GET /healthz` (unauthenticated).
+`GET /healthz` (unauthenticated).
+- Controls (everyone, or host only with `HOST_ONLY_CONTROLS`): `DELETE /api/queue/:id`,
+  `POST /api/skip {id}`, `POST /api/seek {id, position}`.
+- Host: `POST /api/host/login {password}` → `{token}`, `GET /api/host/check`,
+  `POST /api/pause`, `POST /api/resume`. These need the `X-Host-Token` header. The token
+  is an HMAC of `ADMIN_PASSWORD`, so it stays valid across restarts and changing the
+  password revokes it. A custom header is used because `Authorization` is taken by the
+  optional basic auth.
 
 ## Design decisions (don't undo without discussing)
 
-- **Radio semantics.** Skip is global. It takes the current track `id` so two simultaneous
-  skips don't skip two songs. Pause is per listener: resuming sets a fresh `src`, so the
-  listener rejoins live instead of falling behind.
+- **Radio semantics.** Skip and seek are global. They take the current track `id` so stale
+  or simultaneous requests don't hit the wrong song. Pause is per listener: resuming sets a
+  fresh `src`, so the listener rejoins live instead of falling behind.
+- **Host pause is station-wide and opt-in.** A logged-in host with "link" on turns their
+  play/pause button and lock-screen controls into `/api/pause` and `/api/resume`. The host's
+  own audio keeps running on silence, so the notification stays alive for resuming. OS
+  pauses (phone calls) are always local and never become a global pause. A paused station
+  keeps streaming silence, so listeners stay connected. While paused, the client reports
+  `mediaSession.playbackState = 'paused'`. Never pass `playbackRate: 0` to
+  `setPositionState`, because it throws.
+- **Controls take effect about `liveDelayMs` late** for listeners. That's the client buffer.
+  The UI delays its own updates (track, seek, pause) by the same amount instead of
+  flushing the buffer.
 - **One continuous stream, not per-track files.** This is what keeps Android background
   playback and the media notification alive across track changes. Silence between tracks
   is intentional. ffmpeg runs with `-write_xing 0 -id3v2_version 0` so concatenated
@@ -90,7 +117,8 @@ HTTP API: `GET /stream`, `GET /api/state`, `GET /api/events`, `POST /api/queue`,
 
 ## Configuration (env)
 
-`PORT` (3000), `STATION_NAME`, `APP_PASSWORD`, `DATA_DIR` (./data, /data in Docker),
+`PORT` (3000), `STATION_NAME`, `APP_PASSWORD`, `ADMIN_PASSWORD` (enables host mode),
+`HOST_ONLY_CONTROLS` (false), `DATA_DIR` (./data, /data in Docker),
 `BITRATE_KBPS` (128), `BURST_SECONDS` (2), `MAX_QUEUE_LENGTH` (100),
 `MAX_TRACK_SECONDS` (1800), `ALLOWED_DOMAINS` (youtube.com,youtu.be), `FFMPEG_BIN`,
 `YTDLP_BIN`, `YTDLP_EXTRA_ARGS`. Add new settings to `server/config.js`, to the
@@ -99,6 +127,8 @@ commented list in `docker-compose.yml` and to this file.
 ## Conventions
 
 - Keep modules small and dependency-free. Pure logic (queue, validation) gets unit tests in `test/`.
+  Station control flow is tested with a `FakeBroadcaster` (`test/station.test.js`), with no
+  ffmpeg needed. Extend it when you change `Station`.
 - User-facing errors: throw `ValidationError` (→ 400 with `{error}`). Anything else is logged and returns a 500.
 - Logs use a `[area]` prefix (`[station]`, `[api]`, `[ffmpeg]`, `[yt-dlp]`).
 - Frontend: build DOM with `textContent` (never `innerHTML` with server data). Wrap

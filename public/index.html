@@ -15,21 +15,41 @@
     <main class="app">
       <header class="top">
         <h1 id="station-name">Web Radio</h1>
-        <span class="pill" id="connection" data-state="connecting">connecting…</span>
+        <div class="top-right">
+          <button class="pill" id="host-btn" type="button" hidden>Host</button>
+          <span class="pill" id="connection" data-state="connecting">connecting…</span>
+        </div>
       </header>
+
+      <section class="host-panel" id="host-panel" hidden aria-label="Host controls">
+        <label class="switch">
+          <input id="host-link" type="checkbox" />
+          <span>My play/pause controls everyone</span>
+        </label>
+        <button class="link" id="host-logout" type="button">Log out</button>
+      </section>
 
       <section class="now" aria-labelledby="now-title">
         <div class="cover" id="cover">
           <img id="cover-img" alt="" hidden />
         </div>
         <div class="now-text">
-          <p class="eyebrow">Now playing</p>
+          <p class="eyebrow" id="now-eyebrow">Now playing</p>
           <h2 id="now-title">Nothing yet</h2>
           <p class="sub" id="now-sub">Add a song below to get the radio going.</p>
         </div>
-        <div class="progress" aria-hidden="true">
-          <div class="bar"><div class="fill" id="progress-fill"></div></div>
-          <div class="times"><span id="elapsed">0:00</span><span id="duration">0:00</span></div>
+        <div class="progress">
+          <input id="seek" type="range" min="0" max="0" step="1" value="0" disabled
+                 aria-label="Position (moves the stream for everyone)" />
+          <div class="times">
+            <span id="elapsed">0:00</span>
+            <form id="jump-form" class="jump" hidden>
+              <input id="jump" type="text" inputmode="numeric" placeholder="1:23"
+                     pattern="[0-9:]+" aria-label="Jump to time (m:ss)" />
+              <button type="submit">Go</button>
+            </form>
+            <span id="duration">0:00</span>
+          </div>
         </div>
         <div class="controls">
           <button class="play" id="play" type="button" aria-label="Play">
@@ -39,6 +59,13 @@
           <button class="ghost" id="skip" type="button" aria-label="Skip for everyone" disabled>
             <svg viewBox="0 0 24 24"><path d="M6 6l8.5 6L6 18zM16 6h2v12h-2z" /></svg>
           </button>
+        </div>
+        <div class="volume">
+          <button class="mute" id="mute" type="button" aria-label="Mute">
+            <svg viewBox="0 0 24 24" class="icon-volume"><path d="M3 9v6h4l5 5V4L7 9H3zm13.5 3A4.5 4.5 0 0 0 14 8v8a4.5 4.5 0 0 0 2.5-4zM14 3.2v2.1a7 7 0 0 1 0 13.4v2.1a9 9 0 0 0 0-17.6z"/></svg>
+            <svg viewBox="0 0 24 24" class="icon-muted"><path d="M3 9v6h4l5 5V4L7 9H3zm13.6 3 2.9-2.9-1.4-1.4-2.9 2.9-2.9-2.9-1.4 1.4 2.9 2.9-2.9 2.9 1.4 1.4 2.9-2.9 2.9 2.9 1.4-1.4z"/></svg>
+          </button>
+          <input id="volume" type="range" min="0" max="1" step="0.01" value="1" aria-label="Volume (only for you)" />
         </div>
         <p class="sub center" id="listeners"></p>
       </section>

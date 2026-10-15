@@ -1,7 +1,9 @@
-import { createHash, timingSafeEqual } from 'node:crypto';
+import { execFile } from 'node:child_process';
+import { createHash, createHmac, timingSafeEqual } from 'node:crypto';
 import { mkdir, rm } from 'node:fs/promises';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { promisify } from 'node:util';
 import express from 'express';
 import { Broadcaster } from './broadcaster.js';
 import { config } from './config.js';
@@ -10,7 +12,8 @@ import { Station } from './station.js';
 import { parseName, parseTrackUrl, ValidationError } from './validate.js';
 import { YtDlp } from './ytdlp.js';
 
-const publicDir = path.join(path.dirname(fileURLToPath(import.meta.url)), '..', 'public');
+const execFileAsync = promisify(execFile);
+const publicDir =path.join(path.dirname(fileURLToPath(import.meta.url)), '..', 'public');
 
 // The queue lives in memory, so cached files from a previous run are orphans.
 await rm(config.cacheDir, { recursive: true, force: true });
@@ -37,8 +40,13 @@ const station = new Station({
 const eventClients = new Set();
 let broadcastScheduled = false;
 
+const publicState = () => ({
+  ...station.state(),
+  host: { enabled: Boolean(config.adminPassword), onlyControls: config.hostOnlyControls },
+});
+
 function sendState(res) {
-  res.write(`data: ${JSON.stringify(station.state())}\n\n`);
+  res.write(`data: ${JSON.stringify(publicState())}\n\n`);
 }
 
 station.on('change', () => {
@@ -68,7 +76,7 @@ app.use(express.json({ limit: '10kb' }));
 
 app.get('/stream', (req, res) => broadcaster.attach(req, res));
 
-app.get('/api/state', (_req, res) => res.json(station.state()));
+app.get('/api/state', (_req, res) => res.json(publicState()));
 
 app.get('/api/events', (req, res) => {
   res.writeHead(200, {
@@ -91,14 +99,52 @@ app.post('/api/queue', async (req, res) => {
   res.status(201).json({ id: track.id, title: track.title });
 });
 
-app.delete('/api/queue/:id', (req, res) => {
+// --- Host (admin) ---
+// The host logs in once with ADMIN_PASSWORD and gets a token derived from it, sent back in
+// the X-Host-Token header. Changing the password invalidates all tokens.
+
+const hostToken = config.adminPassword
+  ? createHmac('sha256', config.adminPassword).update('web-radio-host').digest('hex')
+  : null;
+
+const isHost = (req) => Boolean(hostToken) && safeEqual(req.get('x-host-token') ?? '', hostToken);
+
+function requireHost(req, res, next) {
+  if (isHost(req)) return next();
+  res.status(403).json({ error: 'Only the host can do that.' });
+}
+
+// Skip, seek and remove: open to everyone unless HOST_ONLY_CONTROLS is set.
+const requireControl = config.hostOnlyControls ? requireHost : (_req, _res, next) => next();
+
+app.post('/api/host/login', async (req, res) => {
+  if (hostToken && safeEqual(String(req.body?.password ?? ''), config.adminPassword)) {
+    return res.json({ token: hostToken });
+  }
+  await new Promise((resolve) => setTimeout(resolve, 1000)); // slow down guessing
+  res.status(403).json({ error: hostToken ? 'Wrong password.' : 'Host mode is not enabled.' });
+});
+
+app.get('/api/host/check', requireHost, (_req, res) => res.json({ ok: true }));
+
+app.post('/api/pause', requireHost, (_req, res) => res.json({ changed: station.pause() }));
+app.post('/api/resume', requireHost, (_req, res) => res.json({ changed: station.resume() }));
+
+// --- Playback controls ---
+
+app.delete('/api/queue/:id', requireControl, (req, res) => {
   if (!station.remove(req.params.id)) return res.status(404).json({ error: 'Track not found.' });
   res.status(204).end();
 });
 
-app.post('/api/skip', (req, res) => {
-  const skipped = station.skip(req.body?.id);
-  res.json({ skipped });
+app.post('/api/skip', requireControl, (req, res) => {
+  res.json({ skipped: station.skip(req.body?.id) });
+});
+
+app.post('/api/seek', requireControl, (req, res) => {
+  const position = Number(req.body?.position);
+  if (!Number.isFinite(position)) throw new ValidationError('Invalid position.');
+  res.json({ seeked: station.seek(req.body?.id, position) });
 });
 
 app.use(
@@ -118,14 +164,18 @@ app.use((err, _req, res, _next) => {
   res.status(500).json({ error: 'Something went wrong.' });
 });
 
-function basicAuth(password) {
+/** Constant-time string comparison. */
+function safeEqual(a, b) {
   const digest = (s) => createHash('sha256').update(s).digest();
-  const expected = digest(password);
+  return timingSafeEqual(digest(a), digest(b));
+}
+
+function basicAuth(password) {
   return (req, res, next) => {
     const [scheme, encoded] = (req.headers.authorization ?? '').split(' ');
     if (scheme === 'Basic' && encoded) {
       const [, ...rest] = Buffer.from(encoded, 'base64').toString().split(':');
-      if (timingSafeEqual(digest(rest.join(':')), expected)) return next();
+      if (safeEqual(rest.join(':'), password)) return next();
     }
     res.set('WWW-Authenticate', 'Basic realm="radio", charset="UTF-8"');
     res.status(401).send('Authentication required');
@@ -134,10 +184,41 @@ function basicAuth(password) {
 
 // --- Startup / shutdown ---
 
+if (config.hostOnlyControls && !config.adminPassword) {
+  console.warn('[server] HOST_ONLY_CONTROLS is set without ADMIN_PASSWORD: nobody can skip or seek.');
+}
+
+await checkBinaries();
+
 station.start();
 const server = app.listen(config.port, () => {
   console.log(`[server] ${config.stationName} listening on http://localhost:${config.port}`);
 });
+server.on('error', (err) => {
+  if (err.code === 'EADDRINUSE') {
+    console.error(`[server] port ${config.port} is already in use (is the Docker container running?). Set PORT to use another one.`);
+    process.exit(1);
+  }
+  throw err;
+});
+
+/** Warns once at startup if ffmpeg or yt-dlp are missing, instead of failing on every use. */
+async function checkBinaries() {
+  const binaries = [
+    ['ffmpeg', config.ffmpegBin, ['-version'], 'FFMPEG_BIN'],
+    ['yt-dlp', config.ytdlpBin, ['--version'], 'YTDLP_BIN'],
+  ];
+  for (const [name, bin, args, envVar] of binaries) {
+    try {
+      await execFileAsync(bin, args, { timeout: 10_000 });
+    } catch (err) {
+      console.error(
+        `[server] ${name} is not usable ("${bin}": ${err.code ?? err.message}). ` +
+          `Install it, set ${envVar}, or run with Docker (docker compose up), which includes it.`,
+      );
+    }
+  }
+}
 
 function shutdown(signal) {
   console.log(`[server] ${signal} received, shutting down`);

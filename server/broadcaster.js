@@ -23,6 +23,7 @@ export class Broadcaster extends EventEmitter {
   #burstMax;
   /** @type {import('node:child_process').ChildProcess|null} */
   #source = null;
+  #spawnFailing = false;
 
   constructor({ ffmpegBin, bitrateKbps, burstSeconds }) {
     super();
@@ -51,9 +52,13 @@ export class Broadcaster extends EventEmitter {
     });
   }
 
-  /** Streams a local audio file in real time. Resolves when it finished or was stopped. */
-  playFile(file) {
-    return this.#runSource(['-re', '-i', file]);
+  /**
+   * Streams a local audio file in real time, starting `offsetSeconds` in.
+   * Resolves when it finished or was stopped.
+   */
+  playFile(file, offsetSeconds = 0) {
+    const seek = offsetSeconds > 0 ? ['-ss', offsetSeconds.toFixed(3)] : [];
+    return this.#runSource(['-re', ...seek, '-i', file]);
   }
 
   /** Streams silence until stop() is called. */
@@ -110,8 +115,14 @@ export class Broadcaster extends EventEmitter {
         if (this.#source === proc) this.#source = null;
         resolve({ code, signal });
       };
+      proc.on('spawn', () => {
+        if (this.#spawnFailing) console.log('[ffmpeg] started again');
+        this.#spawnFailing = false;
+      });
       proc.on('error', (err) => {
-        console.error(`[ffmpeg] failed to start: ${err.message}`);
+        // Log once per outage; the station keeps retrying with backoff.
+        if (!this.#spawnFailing) console.error(`[ffmpeg] failed to start: ${err.message}`);
+        this.#spawnFailing = true;
         done(null, null);
       });
       proc.on('close', done);

@@ -18,6 +18,10 @@ export const config = {
   stationName: process.env.STATION_NAME ?? 'Web Radio',
   // Optional shared password (HTTP Basic auth, any username). Empty = open access.
   appPassword: process.env.APP_PASSWORD ?? '',
+  // Enables host mode (global pause/resume). Empty = no host.
+  adminPassword: process.env.ADMIN_PASSWORD ?? '',
+  // true: only the host may skip, seek and remove songs. false: everyone may.
+  hostOnlyControls: /^(1|true|yes)$/i.test(process.env.HOST_ONLY_CONTROLS ?? ''),
 
   dataDir,
   cacheDir: path.join(dataDir, 'cache'),

@@ -22,7 +22,23 @@ prefill it.
 | --- | --- |
 | Play / Pause | Only affects you. Resuming rejoins the live broadcast. |
 | Skip (in the app or from the notification) | Skips the current song **for everyone**. |
+| Timeline slider, "jump to" time | Moves the song **for everyone**. Also works from the lock screen. |
+| Volume slider / mute | Only affects you. Remembered on your device (not supported on iOS). |
 | ✕ on a queued song | Removes it from the queue. |
+
+Everyone hears changes about 2 seconds after they're made, because that's the size of the
+stream buffer.
+
+### Host mode
+
+Set `ADMIN_PASSWORD` to turn on host mode. A **Host** button then appears at the top. After
+logging in, the host can switch on **"My play/pause controls everyone"**. With that on, the
+host's play/pause button and lock-screen controls pause and resume the whole station. While
+it's paused, listeners stay connected, hear silence, and see "Paused by the host". If the
+host gets a phone call, only their own playback pauses.
+
+Set `HOST_ONLY_CONTROLS=true` to also restrict skipping, seeking and removing songs to the
+host.
 
 ## Configuration
 
@@ -32,6 +48,8 @@ Set these in `docker-compose.yml`:
 | --- | --- | --- |
 | `STATION_NAME` | `Web Radio` | Shown in the app and on the lock screen |
 | `APP_PASSWORD` | *(empty)* | Set it to require a password (any username) |
+| `ADMIN_PASSWORD` | *(empty)* | Host password. Turns on host mode (see above) |
+| `HOST_ONLY_CONTROLS` | `false` | `true`: only the host can skip, seek and remove songs |
 | `ALLOWED_DOMAINS` | `youtube.com,youtu.be` | `*` allows any site yt-dlp supports |
 | `BITRATE_KBPS` | `128` | Stream bitrate |
 | `MAX_TRACK_SECONDS` | `1800` | Longest allowed track |

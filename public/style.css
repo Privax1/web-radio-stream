@@ -62,8 +62,6 @@ html, body {
 .sub { margin: 2px 0 0; color: var(--muted); font-size: .875rem; }
 .center { text-align: center; }
 
-.bar { height: 4px; background: var(--surface-2); border-radius: 2px; overflow: hidden; }
-.fill { height: 100%; width: 0; background: var(--accent); transition: width .5s linear; }
 .times { display: flex; justify-content: space-between; font-size: .75rem; color: var(--muted); margin-top: 4px; font-variant-numeric: tabular-nums; }
 
 .controls { display: flex; justify-content: center; align-items: center; gap: 20px; }
@@ -140,3 +138,69 @@ input:focus { outline: 2px solid var(--accent); outline-offset: 0; }
 .queue .meta { font-size: .75rem; color: var(--muted); }
 .queue .remove { width: 36px; height: 36px; border-radius: 50%; color: var(--muted); }
 .queue .remove svg { width: 20px; height: 20px; }
+
+/* --- Seeking --- */
+
+.progress input[type="range"] {
+  width: 100%;
+  margin: 0;
+  padding: 0;
+  height: 20px;
+  border: 0;
+  background: none;
+  accent-color: var(--accent);
+  cursor: pointer;
+}
+.progress input[type="range"]:disabled { cursor: default; opacity: .6; }
+.progress input[type="range"]:focus { outline: none; }
+
+.times { align-items: center; }
+.jump { display: flex; gap: 4px; }
+.jump input { width: 64px; padding: 4px 8px; font-size: .8rem; text-align: center; }
+.jump button { font-size: .8rem; padding: 4px 10px; border-radius: 8px; background: var(--surface-2); }
+
+/* Mirror the skip button so play stays centered. */
+.controls::before { content: ""; width: 48px; }
+
+/* --- Volume --- */
+
+.volume { display: flex; align-items: center; gap: 10px; padding: 0 4px; }
+.volume input[type="range"] {
+  flex: 1;
+  margin: 0;
+  padding: 0;
+  height: 20px;
+  border: 0;
+  background: none;
+  accent-color: var(--accent);
+  cursor: pointer;
+}
+.volume input[type="range"]:focus { outline: none; }
+.mute { width: 36px; height: 36px; display: grid; place-items: center; color: var(--muted); }
+.mute svg { width: 22px; height: 22px; }
+.mute .icon-muted, .mute.muted .icon-volume { display: none; }
+.mute.muted .icon-muted { display: block; }
+
+/* --- Host --- */
+
+.top-right { display: flex; gap: 8px; align-items: center; }
+button.pill { cursor: pointer; }
+button.pill.active { background: var(--accent); color: var(--accent-text); }
+
+.host-panel {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 12px;
+  background: var(--surface);
+  border: 1px solid var(--accent);
+  border-radius: var(--radius);
+  padding: 10px 14px;
+  font-size: .875rem;
+}
+.host-panel[hidden] { display: none; }
+.switch { display: flex; align-items: center; gap: 8px; cursor: pointer; }
+.switch input { width: 18px; height: 18px; accent-color: var(--accent); }
+.link { color: var(--muted); text-decoration: underline; font-size: .8rem; }
+
+.eyebrow.paused { color: var(--accent); }

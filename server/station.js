@@ -6,14 +6,25 @@ import { setTimeout as sleep } from 'node:timers/promises';
  * Ties the queue, the downloader and the broadcaster together.
  *
  * - Downloads queued tracks one at a time, in queue order.
- * - Plays ready tracks back to back; streams silence while nothing is ready.
+ * - Plays ready tracks back to back; streams silence while nothing is ready or while paused.
+ * - Station-wide controls: skip, seek, pause/resume. Each one stops the current ffmpeg
+ *   source; the play loop then decides what to stream next.
  * - Emits 'change' whenever the public state (see state()) changes.
  */
 export class Station extends EventEmitter {
-  /** @type {(import('./queue.js').Track & {startedAt: number}) | null} */
+  /**
+   * The track on air. `startedAt` is the server time at which position 0 would have played
+   * (null while paused); `position` is the offset in seconds the current source started at.
+   * @type {(import('./queue.js').Track & {startedAt: number|null, position: number}) | null}
+   */
   current = null;
+  paused = false;
   #downloading = false;
   #running = false;
+  #skipRequested = false;
+  /** @type {number|null} */
+  #seekTo = null;
+  #silenceFailures = 0;
 
   /**
    * @param {object} deps
@@ -50,9 +61,42 @@ export class Station extends EventEmitter {
 
   /** Skips the current track. `expectedId` prevents two simultaneous skips from skipping twice. */
   skip(expectedId) {
-    if (!this.current || (expectedId && this.current.id !== expectedId)) return false;
+    if (!this.#isCurrent(expectedId)) return false;
     console.log(`[station] skipped "${this.current.title}"`);
+    this.#skipRequested = true;
     this.broadcaster.stop();
+    return true;
+  }
+
+  /** Jumps the current track to `seconds` for everyone. */
+  seek(expectedId, seconds) {
+    if (!this.#isCurrent(expectedId) || !Number.isFinite(seconds)) return false;
+    const position = Math.min(Math.max(seconds, 0), Math.max(this.current.duration - 1, 0));
+    if (this.paused) {
+      this.current.position = position;
+      this.emit('change');
+    } else {
+      this.#seekTo = position;
+      this.broadcaster.stop();
+    }
+    return true;
+  }
+
+  /** Pauses the station for everyone. Listeners stay connected and hear silence. */
+  pause() {
+    if (this.paused) return false;
+    this.paused = true;
+    console.log('[station] paused');
+    if (this.current) this.broadcaster.stop();
+    this.emit('change');
+    return true;
+  }
+
+  resume() {
+    if (!this.paused) return false;
+    this.paused = false;
+    console.log('[station] resumed');
+    this.emit('change'); // ends the paused silence, see #silenceUntil
     return true;
   }
 
@@ -74,49 +118,103 @@ export class Station extends EventEmitter {
       addedBy: t.addedBy,
       status: t.status,
     });
+    const now = this.current;
     return {
       stationName: this.stationName,
       serverTime: Date.now(),
       liveDelayMs: this.liveDelayMs,
       listeners: this.broadcaster.listenerCount,
-      nowPlaying: this.current ? { ...pub(this.current), startedAt: this.current.startedAt } : null,
+      paused: this.paused,
+      nowPlaying: now ? { ...pub(now), startedAt: now.startedAt, position: now.position } : null,
       queue: this.queue.tracks.map(pub),
     };
   }
 
+  #isCurrent(expectedId) {
+    return Boolean(this.current) && (!expectedId || this.current.id === expectedId);
+  }
+
   async #loop() {
     while (this.#running) {
+      if (this.paused) {
+        await this.#silenceUntil(() => !this.paused);
+        continue;
+      }
       const track = this.queue.takeNextReady();
-
       if (!track) {
-        // Stream silence until a track becomes ready.
-        const onChange = () => {
-          if (this.queue.hasReady() || !this.#running) this.broadcaster.stop();
-        };
-        this.queue.on('change', onChange);
-        const startedAt = Date.now();
-        const silence = this.broadcaster.playSilence();
-        onChange();
-        await silence;
-        this.queue.off('change', onChange);
-        if (Date.now() - startedAt < 1000 && !this.queue.hasReady()) await sleep(1000); // ffmpeg broken?
+        await this.#silenceUntil(() => this.queue.hasReady() || this.paused);
         continue;
       }
 
-      this.current = { ...track, startedAt: Date.now() };
-      this.emit('change');
       console.log(`[station] now playing "${track.title}"`);
-
-      const startedAt = Date.now();
-      const { code, signal } = await this.broadcaster.playFile(track.file);
-      if (code !== 0 && !signal) {
-        console.error(`[station] ffmpeg exited with code ${code} while playing "${track.title}"`);
-        if (Date.now() - startedAt < 1000) await sleep(1000);
-      }
-
+      await this.#playTrack(track);
       this.#deleteFile(track.file);
       this.current = null;
       this.emit('change');
+    }
+  }
+
+  /** Plays one track to the end, handling seeks and pauses on the way. */
+  async #playTrack(track) {
+    let position = 0;
+    this.#skipRequested = false;
+    this.#seekTo = null;
+
+    while (this.#running) {
+      if (this.paused) {
+        this.current = { ...track, startedAt: null, position };
+        this.emit('change');
+        await this.#silenceUntil(() => !this.paused || this.#skipRequested);
+        if (this.#skipRequested) break;
+        position = this.current.position; // a seek while paused moves this
+        continue;
+      }
+
+      const startedAt = Date.now() - position * 1000;
+      this.current = { ...track, startedAt, position };
+      this.emit('change');
+
+      const sourceStart = Date.now();
+      const { code, signal } = await this.broadcaster.playFile(track.file, position);
+
+      if (this.#skipRequested) break;
+      if (this.#seekTo !== null) {
+        position = this.#seekTo;
+        this.#seekTo = null;
+        continue;
+      }
+      if (this.paused) {
+        position = Math.min((Date.now() - startedAt) / 1000, track.duration);
+        continue;
+      }
+      if (code !== 0 && !signal) {
+        console.error(`[station] ffmpeg exited with code ${code} while playing "${track.title}"`);
+        if (Date.now() - sourceStart < 1000) await sleep(1000);
+      }
+      break; // finished
+    }
+    this.#skipRequested = false;
+  }
+
+  /** Streams silence until `done()` is true (re-checked on every state change). */
+  async #silenceUntil(done) {
+    const check = () => {
+      if (done() || !this.#running) this.broadcaster.stop();
+    };
+    this.on('change', check);
+    const startedAt = Date.now();
+    const silence = this.broadcaster.playSilence();
+    check();
+    await silence;
+    this.off('change', check);
+
+    // Silence ending on its own within a second means ffmpeg is broken or missing.
+    // Back off (1s, 2s, 4s … 30s) instead of retrying in a tight loop.
+    if (Date.now() - startedAt < 1000 && !done()) {
+      await sleep(Math.min(1000 * 2 ** this.#silenceFailures, 30_000));
+      this.#silenceFailures++;
+    } else {
+      this.#silenceFailures = 0;
     }
   }
 
