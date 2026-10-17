@@ -10,9 +10,9 @@ services:
     environment:
       STATION_NAME: "Web Radio"
       # Shared password for the whole site (HTTP Basic auth, any username). Empty = open.
-      APP_PASSWORD: ""
+      APP_PASSWORD: ${APP_PASSWORD}
       # Host password: enables host login with station-wide pause/resume. Empty = no host.
-      ADMIN_PASSWORD: ""
+      ADMIN_PASSWORD: ${ADMIN_PASSWORD}
       # "true": only the host may skip, seek and remove songs.
       # HOST_ONLY_CONTROLS: "false"
       # BITRATE_KBPS: "128"
