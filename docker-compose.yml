@@ -1,6 +1,7 @@
 services:
   radio:
     build: .
+    pull_policy: build
     image: web-radio-stream
     init: true
     restart: unless-stopped
