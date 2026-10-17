@@ -23,7 +23,11 @@ services:
       # ALLOWED_DOMAINS: "youtube.com,youtu.be,soundcloud.com"   # "*" = anything yt-dlp supports
     volumes:
       - radio-cache:/data
-
+    labels:
+      - homepage.group=Media
+      - homepage.name=Web-Radio
+      - homepage.icon=youtube-music.png
+      - homepage.href=https://radio.privax.ipv64.de:12012
 volumes:
   radio-cache:
 networks:
