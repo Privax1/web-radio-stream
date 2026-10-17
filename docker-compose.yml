@@ -5,8 +5,8 @@ services:
     image: web-radio-stream
     init: true
     restart: unless-stopped
-    ports:
-      - "3000:3000"
+    networks:
+      proxy:
     environment:
       STATION_NAME: "Web Radio"
       # Shared password for the whole site (HTTP Basic auth, any username). Empty = open.
@@ -26,3 +26,6 @@ services:
 
 volumes:
   radio-cache:
+networks:
+  proxy:
+    external: true
