@@ -9,7 +9,7 @@ import { Broadcaster } from './broadcaster.js';
 import { config } from './config.js';
 import { Queue, QueueFullError } from './queue.js';
 import { Station } from './station.js';
-import { parseName, parseTrackUrl, ValidationError } from './validate.js';
+import { isAllowedUrl, parseName, parseTrackUrl, ValidationError } from './validate.js';
 import { YtDlp } from './ytdlp.js';
 
 const execFileAsync = promisify(execFile);
@@ -33,6 +33,7 @@ const station = new Station({
   cacheDir: config.cacheDir,
   stationName: config.stationName,
   liveDelayMs: config.burstSeconds * 1000,
+  historyLength: config.historyLength,
 });
 
 // --- Server-sent events: push the full state to every open page on each change ---
@@ -90,13 +91,47 @@ app.get('/api/events', (req, res) => {
   req.on('close', () => eventClients.delete(res));
 });
 
+// Adds a single track or, for playlist links, every usable entry of the playlist.
 app.post('/api/queue', async (req, res) => {
   const url = parseTrackUrl(req.body?.url, config.allowedDomains);
   const addedBy = parseName(req.body?.name);
-  const info = await ytdlp.fetchInfo(url);
-  const track = queue.add({ ...info, addedBy });
-  console.log(`[api] queued "${track.title}"${addedBy ? ` (by ${addedBy})` : ''}`);
-  res.status(201).json({ id: track.id, title: track.title });
+  const free = queue.maxLength - queue.tracks.length;
+  if (free <= 0) throw new QueueFullError(`The queue is full (${queue.maxLength} tracks).`);
+
+  const result = await ytdlp.resolve(url, {
+    wholePlaylist: req.body?.playlist === true,
+    maxEntries: Math.min(config.maxPlaylistLength, free),
+    allowUrl: (entryUrl) => isAllowedUrl(entryUrl, config.allowedDomains),
+  });
+
+  const added = [];
+  for (const info of result.tracks) {
+    try {
+      added.push(queue.add({ ...info, addedBy }));
+    } catch (err) {
+      if (err instanceof QueueFullError) break; // filled up while we were looking it up
+      throw err;
+    }
+  }
+  if (added.length === 0) {
+    throw new ValidationError(
+      result.playlist ? 'None of the tracks in that playlist could be added.' : 'The queue is full.',
+    );
+  }
+
+  const by = addedBy ? ` (by ${addedBy})` : '';
+  if (result.playlist) {
+    console.log(`[api] queued ${added.length} tracks from playlist "${result.playlist}"${by}`);
+  } else {
+    console.log(`[api] queued "${added[0].title}"${by}`);
+  }
+  res.status(201).json({
+    id: added[0].id,
+    title: added[0].title,
+    playlist: result.playlist,
+    added: added.length,
+    skipped: result.tracks.length - added.length + result.skipped,
+  });
 });
 
 // --- Host (admin) ---

@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import { parseName, parseTrackUrl, ValidationError } from '../server/validate.js';
+import { isAllowedUrl, parseName, parseTrackUrl, ValidationError } from '../server/validate.js';
 
 const yt = ['youtube.com', 'youtu.be'];
 
@@ -37,4 +37,12 @@ test('parseName trims, truncates and drops empty names', () => {
   assert.equal(parseName('x'.repeat(50)).length, 32);
   assert.equal(parseName('   '), null);
   assert.equal(parseName(undefined), null);
+});
+
+test('isAllowedUrl checks the allowlist without throwing', () => {
+  const domains = ['youtube.com', 'soundcloud.com'];
+  assert.equal(isAllowedUrl('https://api-v2.soundcloud.com/tracks/1', domains), true);
+  assert.equal(isAllowedUrl('https://on.soundcloud.com/abc', domains), true);
+  assert.equal(isAllowedUrl('https://example.com/x', domains), false);
+  assert.equal(isAllowedUrl(undefined, domains), false);
 });

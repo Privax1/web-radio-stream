@@ -73,9 +73,13 @@
       <section class="add" aria-label="Add a song">
         <form id="add-form">
           <input id="url" name="url" type="url" inputmode="url" autocomplete="off" required
-                 placeholder="Paste a YouTube link" />
+                 placeholder="YouTube or SoundCloud link (song or playlist)" />
           <button type="submit" id="add-btn">Add</button>
         </form>
+        <label class="switch option" id="playlist-option" hidden>
+          <input id="whole-playlist" type="checkbox" />
+          <span>Add the whole playlist, not just this song</span>
+        </label>
         <label class="name">
           <span>Your name</span>
           <input id="name" type="text" maxlength="32" autocomplete="nickname" placeholder="optional" />
@@ -87,6 +91,19 @@
         <h3 id="queue-title">Up next <span id="queue-count"></span></h3>
         <ol id="queue-list"></ol>
         <p class="sub" id="queue-empty">The queue is empty.</p>
+      </section>
+
+      <details class="queue history" id="history">
+        <summary><h3>Recently played <span id="history-count"></span></h3></summary>
+        <ol id="history-list"></ol>
+        <p class="sub" id="history-empty">Nothing has been played yet.</p>
+      </details>
+
+      <section class="settings" aria-label="Settings">
+        <label class="switch">
+          <input id="show-covers" type="checkbox" checked />
+          <span>Load cover images</span>
+        </label>
       </section>
     </main>
 

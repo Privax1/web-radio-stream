@@ -29,6 +29,9 @@ let dragging = false; // user is dragging the seek slider
 
 let hostToken = load('hostToken');
 let hostLinked = load('hostLinked') !== 'false';
+// Cover images come from YouTube/SoundCloud servers. Turning them off saves data and
+// avoids those third-party requests. Personal, remembered per device.
+let showCovers = load('showCovers') !== 'false';
 
 // --- Server state (SSE) ---
 
@@ -60,6 +63,7 @@ function applyState(next) {
   const n = next.listeners;
   $('#listeners').textContent = n === 1 ? '1 listener' : `${n} listeners`;
   renderQueue(next.queue);
+  renderHistory(next.history);
   renderHost();
 
   // While listening, we hear audio streamLagMs() after the server sends it. Delay natural
@@ -89,14 +93,7 @@ function setNowPlaying(track) {
   shownTrack = track;
 
   if (trackChanged) {
-    const img = $('#cover-img');
-    if (track?.thumbnail) {
-      img.src = track.thumbnail;
-      img.hidden = false;
-    } else {
-      img.hidden = true;
-      img.removeAttribute('src');
-    }
+    renderCover(track);
     $('#now-title').textContent = track ? track.title : 'Nothing yet';
     $('#now-sub').textContent = track
       ? [track.uploader, track.addedBy && `added by ${track.addedBy}`].filter(Boolean).join(' · ')
@@ -109,6 +106,17 @@ function setNowPlaying(track) {
   updateControls();
   updateProgress();
   updatePositionState();
+}
+
+function renderCover(track) {
+  const img = $('#cover-img');
+  if (showCovers && track?.thumbnail) {
+    img.src = track.thumbnail;
+    img.hidden = false;
+  } else {
+    img.hidden = true;
+    img.removeAttribute('src');
+  }
 }
 
 /**
@@ -333,7 +341,7 @@ function updateMediaMetadata(track) {
     title: track ? track.title : 'Waiting for the next song…',
     artist: track?.uploader ?? stationName,
     album: stationName,
-    artwork: track?.thumbnail
+    artwork: showCovers && track?.thumbnail
       ? [{ src: track.thumbnail }]
       : [{ src: '/icons/icon-512.png', sizes: '512x512', type: 'image/png' }],
   });
@@ -445,77 +453,187 @@ async function hostApi(method, url, body) {
 
 const removeIcon =
   '<svg viewBox="0 0 24 24"><path d="M18.3 5.7 12 12l6.3 6.3-1.4 1.4L10.6 13.4 4.3 19.7 2.9 18.3 9.2 12 2.9 5.7l1.4-1.4 6.3 6.3 6.3-6.3z"/></svg>';
+const addIcon = '<svg viewBox="0 0 24 24"><path d="M11 5h2v6h6v2h-6v6h-2v-6H5v-2h6z"/></svg>';
+
+/** One row of the queue or history list: cover, title, meta line and an optional button. */
+function trackRow(track, metaParts, button) {
+  const li = document.createElement('li');
+
+  if (showCovers) {
+    const thumb = document.createElement(track.thumbnail ? 'img' : 'div');
+    thumb.className = 'thumb';
+    if (track.thumbnail) {
+      thumb.src = track.thumbnail;
+      thumb.alt = '';
+      thumb.loading = 'lazy';
+    }
+    li.append(thumb);
+  }
+
+  const text = document.createElement('div');
+  text.className = 'text';
+  const title = document.createElement('div');
+  title.className = 'title';
+  title.textContent = track.title;
+  title.title = track.title;
+  const meta = document.createElement('div');
+  meta.className = 'meta';
+  meta.textContent = metaParts.filter(Boolean).join(' · ');
+  text.append(title, meta);
+  li.append(text);
+
+  if (button) li.append(button);
+  return li;
+}
+
+function iconButton(className, icon, label, onClick) {
+  const button = document.createElement('button');
+  button.type = 'button';
+  button.className = className;
+  button.setAttribute('aria-label', label);
+  button.title = label;
+  button.innerHTML = icon; // static markup, no server data
+  button.addEventListener('click', () => onClick(button));
+  return button;
+}
 
 function renderQueue(tracks) {
   const control = canControl();
-  const list = $('#queue-list');
-  list.replaceChildren(
-    ...tracks.map((track) => {
-      const li = document.createElement('li');
-
-      const thumb = document.createElement(track.thumbnail ? 'img' : 'div');
-      thumb.className = 'thumb';
-      if (track.thumbnail) {
-        thumb.src = track.thumbnail;
-        thumb.alt = '';
-        thumb.loading = 'lazy';
-      }
-
-      const text = document.createElement('div');
-      text.style.minWidth = '0';
-      const title = document.createElement('div');
-      title.className = 'title';
-      title.textContent = track.title;
-      const meta = document.createElement('div');
-      meta.className = 'meta';
-      meta.textContent = [
-        formatTime(track.duration),
-        track.status === 'ready' ? null : track.status === 'downloading' ? 'loading…' : 'waiting',
-        track.addedBy && `by ${track.addedBy}`,
-      ]
-        .filter(Boolean)
-        .join(' · ');
-      text.append(title, meta);
-      li.append(thumb, text);
-
-      if (control) {
-        const remove = document.createElement('button');
-        remove.type = 'button';
-        remove.className = 'remove';
-        remove.setAttribute('aria-label', `Remove ${track.title}`);
-        remove.innerHTML = removeIcon;
-        remove.addEventListener('click', () =>
-          api('DELETE', `/api/queue/${track.id}`).catch((err) => showMessage(err.message, true)),
-        );
-        li.append(remove);
-      }
-      return li;
-    }),
+  $('#queue-list').replaceChildren(
+    ...tracks.map((track) =>
+      trackRow(
+        track,
+        [
+          formatTime(track.duration),
+          track.status === 'ready' ? null : track.status === 'downloading' ? 'loading…' : 'waiting',
+          track.addedBy && `by ${track.addedBy}`,
+        ],
+        control &&
+          iconButton('remove', removeIcon, `Remove ${track.title}`, () =>
+            api('DELETE', `/api/queue/${track.id}`).catch((err) => showMessage(err.message, true)),
+          ),
+      ),
+    ),
   );
   $('#queue-count').textContent = tracks.length ? `(${tracks.length})` : '';
   $('#queue-empty').hidden = tracks.length > 0;
 }
+
+// --- History ---
+
+function renderHistory(tracks = []) {
+  $('#history-list').replaceChildren(
+    ...tracks.map((track) =>
+      trackRow(
+        track,
+        [timeAgo(track.playedAt), formatTime(track.duration), track.addedBy && `by ${track.addedBy}`],
+        iconButton('requeue', addIcon, `Add ${track.title} again`, async (button) => {
+          button.disabled = true;
+          try {
+            await addToQueue(track.url);
+          } finally {
+            button.disabled = false;
+          }
+        }),
+      ),
+    ),
+  );
+  $('#history-count').textContent = tracks.length ? `(${tracks.length})` : '';
+  $('#history-empty').hidden = tracks.length > 0;
+}
+
+/** "just now", "5 min ago", "2 h ago" or a date, from a server timestamp. */
+function timeAgo(serverMs) {
+  const minutes = Math.floor((Date.now() + clockOffset - serverMs) / 60_000);
+  if (minutes < 1) return 'just now';
+  if (minutes < 60) return `${minutes} min ago`;
+  if (minutes < 24 * 60) return `${Math.floor(minutes / 60)} h ago`;
+  return new Date(serverMs - clockOffset).toLocaleDateString();
+}
+
+// --- Cover images toggle ---
+
+function applyCovers() {
+  document.body.classList.toggle('no-covers', !showCovers);
+  $('#show-covers').checked = showCovers;
+}
+
+$('#show-covers').addEventListener('change', (e) => {
+  showCovers = e.target.checked;
+  save('showCovers', String(showCovers));
+  applyCovers();
+  renderCover(shownTrack);
+  if (shownTrack) updateMediaMetadata(shownTrack);
+  if (state) {
+    renderQueue(state.queue);
+    renderHistory(state.history);
+  }
+});
+applyCovers();
 
 // --- Adding songs ---
 
 nameInput.value = load('name') ?? '';
 nameInput.addEventListener('change', () => save('name', nameInput.value.trim()));
 
-$('#add-form').addEventListener('submit', async (e) => {
-  e.preventDefault();
-  const urlInput = $('#url');
-  const button = $('#add-btn');
-  button.disabled = true;
-  showMessage('Looking it up…');
+/** Queues a link (song or playlist). Resolves to true on success; shows the outcome. */
+async function addToQueue(url, playlist = false) {
+  showMessage(playlist || looksLikePlaylist(url) ? 'Loading the playlist…' : 'Looking it up…');
   try {
-    const track = await api('POST', '/api/queue', { url: urlInput.value, name: nameInput.value });
-    showMessage(`Added “${track.title}”.`);
-    urlInput.value = '';
+    const result = await api('POST', '/api/queue', { url, name: nameInput.value, playlist });
+    if (result.playlist) {
+      const skipped = result.skipped ? ` (${result.skipped} skipped)` : '';
+      showMessage(`Added ${result.added} songs from “${result.playlist}”${skipped}.`);
+    } else {
+      showMessage(`Added “${result.title}”.`);
+    }
+    return true;
   } catch (err) {
     showMessage(err.message, true);
-  } finally {
-    button.disabled = false;
+    return false;
   }
+}
+
+/** Pure playlist links (always added whole), e.g. YouTube ?list= or SoundCloud /sets/. */
+function looksLikePlaylist(url) {
+  const parsed = parseUrl(url);
+  if (!parsed) return false;
+  return /\/sets\//.test(parsed.pathname) || (parsed.searchParams.has('list') && !isMixedLink(parsed));
+}
+
+/** A YouTube link to one video inside a playlist: we ask whether to take the whole list. */
+function isMixedLink(parsed) {
+  return parsed.searchParams.has('list') && (parsed.searchParams.has('v') || parsed.hostname.endsWith('youtu.be'));
+}
+
+function parseUrl(text) {
+  try {
+    return new URL(text.trim());
+  } catch {
+    return null;
+  }
+}
+
+const urlInput = $('#url');
+const playlistOption = $('#playlist-option');
+
+function updatePlaylistOption() {
+  const parsed = parseUrl(urlInput.value);
+  playlistOption.hidden = !(parsed && isMixedLink(parsed));
+}
+urlInput.addEventListener('input', updatePlaylistOption);
+
+$('#add-form').addEventListener('submit', async (e) => {
+  e.preventDefault();
+  const button = $('#add-btn');
+  button.disabled = true;
+  const wholePlaylist = !playlistOption.hidden && $('#whole-playlist').checked;
+  if (await addToQueue(urlInput.value, wholePlaylist)) {
+    urlInput.value = '';
+    $('#whole-playlist').checked = false;
+    updatePlaylistOption();
+  }
+  button.disabled = false;
 });
 
 function showMessage(text, isError = false) {
@@ -528,7 +646,8 @@ function showMessage(text, isError = false) {
 const shared = new URLSearchParams(location.search);
 const sharedUrl = shared.get('url') || shared.get('text')?.match(/https?:\/\/\S+/)?.[0];
 if (sharedUrl) {
-  $('#url').value = sharedUrl;
+  urlInput.value = sharedUrl;
+  updatePlaylistOption();
   history.replaceState(null, '', '/');
 }
 
@@ -565,6 +684,8 @@ function save(key, value) {
 }
 
 setInterval(updateProgress, 1000);
+// Keep "5 min ago" in the history current.
+setInterval(() => state && renderHistory(state.history), 60_000);
 // Keep the lock-screen progress bar honest after clock drift / stream hiccups.
 setInterval(updatePositionState, 15_000);
 

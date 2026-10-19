@@ -32,6 +32,16 @@ export function parseTrackUrl(input, allowedDomains) {
   return url.toString();
 }
 
+/** True if `input` is an http(s) URL on an allowed host. Used for playlist entries. */
+export function isAllowedUrl(input, allowedDomains) {
+  try {
+    parseTrackUrl(input, allowedDomains);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
 /** Trims an optional display name; returns null when empty. */
 export function parseName(input) {
   if (typeof input !== 'string') return null;

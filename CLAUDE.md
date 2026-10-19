@@ -4,7 +4,8 @@ This file guides Claude Code (claude.ai/code) when working in this repository.
 
 ## What this is
 
-A self-hosted "shared radio". Anyone with the link can queue YouTube videos. The server
+A self-hosted "shared radio". Anyone with the link can queue YouTube videos and SoundCloud
+tracks, single songs or whole playlists. The server
 downloads the audio and broadcasts one continuous live MP3 stream, so every listener hears
 the same position. The frontend is an installable PWA. It uses a plain `<audio>` element plus
 the Media Session API, so on Android it behaves like a music app: it keeps playing in the
@@ -41,7 +42,7 @@ server/
   station.js      orchestrator: download worker + play loop + public state()
   broadcaster.js  one ffmpeg "source" at a time -> fanned out to all /stream listeners
   queue.js        in-memory ordered track list (pure, unit-tested)
-  ytdlp.js        yt-dlp wrapper (fetchInfo, downloadAudio)
+  ytdlp.js        yt-dlp wrapper (resolve: track or playlist, fetchInfo, downloadAudio)
   validate.js     URL / name validation (pure, unit-tested)
   mp3.js          MP3 frame splitter used for frame-aligned pacing (pure, unit-tested)
 public/
@@ -51,15 +52,22 @@ public/
 ```
 
 Flow:
-1. `POST /api/queue {url, name}` validates the URL (domain allowlist), runs `yt-dlp -J` for
-   title/duration, and appends a `pending` track.
+1. `POST /api/queue {url, name, playlist?}` validates the URL (domain allowlist) and calls
+   `YtDlp#resolve`: `yt-dlp -J --flat-playlist` for title/duration. A single track is
+   appended as `pending`. For a playlist (YouTube list, SoundCloud set) every usable entry is
+   appended, up to `MAX_PLAYLIST_LENGTH` and the free queue space. Entries without title or
+   duration (SoundCloud flat entries) are looked up one by one, 4 at a time. Entry URLs must
+   also pass the allowlist; bad entries are skipped and counted. A YouTube link that is both
+   a video and a list (`watch?v=…&list=…`) adds only the video unless `playlist: true`.
 2. `Station#downloadNext` downloads queued tracks **one at a time** to `DATA_DIR/cache/<id>.<ext>`
    (`pending → downloading → ready`). Failed downloads are dropped from the queue.
 3. `Station#loop` takes the first `ready` track and `#playTrack` calls
    `broadcaster.playFile(file, offset)` (`ffmpeg [-ss offset] … -f mp3 pipe:1`). When
    nothing is ready, or while the station is paused, it streams silence (`anullsrc`) via
    `#silenceUntil(predicate)`. The predicate is re-checked on every station `'change'`.
-   Finished files are deleted.
+   Finished files are deleted. Finished or skipped tracks go to `station.history` (newest
+   first, `playedAt` = start time, capped at `HISTORY_LENGTH`), shown as "Recently played"
+   with a button to queue the track again.
    Station controls (`skip`, `seek`, `pause`, `resume`) set a flag and call `#cut()`. That
    cuts the broadcaster and bumps `epoch`. `#playTrack` then reads the flag to decide what to
    stream next: a restart at a new offset, silence, or the next track. The file stays
@@ -120,6 +128,9 @@ HTTP API: `GET /stream`, `GET /api/state`, `GET /api/events`, `POST /api/queue`,
 - **`pause()` keeps the `src`.** Removing it would make Android drop the notification and
   its play button.
 - **The service worker must never intercept `/stream` or `/api/*`.**
+- **Cover images are optional per device.** The "Load cover images" switch (localStorage
+  `showCovers`) stops the client from loading thumbnails at all (cover, lists and lock-screen
+  artwork), which saves data and avoids requests to YouTube/SoundCloud image hosts.
 - **State is in memory.** A restart clears the queue, and the cache dir is wiped on boot.
   That is acceptable for the MVP. If persistence is added, store the queue as JSON in `DATA_DIR`.
 - **Security:** URLs go to yt-dlp after `--` (no option injection) and must match
@@ -133,13 +144,15 @@ HTTP API: `GET /stream`, `GET /api/state`, `GET /api/events`, `POST /api/queue`,
 `PORT` (3000), `STATION_NAME`, `APP_PASSWORD`, `ADMIN_PASSWORD` (enables host mode),
 `HOST_ONLY_CONTROLS` (false), `DATA_DIR` (./data, /data in Docker),
 `BITRATE_KBPS` (128), `BURST_SECONDS` (2), `MAX_QUEUE_LENGTH` (100),
-`MAX_TRACK_SECONDS` (1800), `ALLOWED_DOMAINS` (youtube.com,youtu.be), `FFMPEG_BIN`,
+`MAX_TRACK_SECONDS` (1800), `MAX_PLAYLIST_LENGTH` (50), `HISTORY_LENGTH` (50),
+`ALLOWED_DOMAINS` (youtube.com,youtu.be,soundcloud.com), `FFMPEG_BIN`,
 `YTDLP_BIN`, `YTDLP_EXTRA_ARGS`. Add new settings to `server/config.js`, to the
 commented list in `docker-compose.yml` and to this file.
 
 ## Conventions
 
 - Keep modules small and dependency-free. Pure logic (queue, validation) gets unit tests in `test/`.
+  `YtDlp#resolve` is tested with a faked `runJson` (`test/ytdlp.test.js`).
   Station control flow is tested with a `FakeBroadcaster` (`test/station.test.js`), with no
   ffmpeg needed. Extend it when you change `Station`.
 - User-facing errors: throw `ValidationError` (→ 400 with `{error}`). Anything else is logged and returns a 500.
