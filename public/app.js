@@ -606,6 +606,12 @@ function isMixedLink(parsed) {
   return parsed.searchParams.has('list') && (parsed.searchParams.has('v') || parsed.hostname.endsWith('youtu.be'));
 }
 
+/** The first http(s) link in pasted text (e.g. an app's "Listen to X on SoundCloud https://…"). */
+function extractUrl(text) {
+  const match = text.match(/https?:\/\/[^\s<>"']+/i);
+  return match ? match[0].replace(/[.,;:!?)\]]+$/, '') : text.trim();
+}
+
 function parseUrl(text) {
   try {
     return new URL(text.trim());
@@ -621,7 +627,12 @@ function updatePlaylistOption() {
   const parsed = parseUrl(urlInput.value);
   playlistOption.hidden = !(parsed && isMixedLink(parsed));
 }
-urlInput.addEventListener('input', updatePlaylistOption);
+urlInput.addEventListener('input', () => {
+  // Pasted share text: keep only the link.
+  const url = extractUrl(urlInput.value);
+  if (url !== urlInput.value && /^https?:\/\//i.test(url)) urlInput.value = url;
+  updatePlaylistOption();
+});
 
 $('#add-form').addEventListener('submit', async (e) => {
   e.preventDefault();
@@ -644,7 +655,8 @@ function showMessage(text, isError = false) {
 
 // Android "share to" target: /?url=... (see share_target in the manifest).
 const shared = new URLSearchParams(location.search);
-const sharedUrl = shared.get('url') || shared.get('text')?.match(/https?:\/\/\S+/)?.[0];
+const sharedText = shared.get('url') || shared.get('text') || '';
+const sharedUrl = /https?:\/\//i.test(sharedText) ? extractUrl(sharedText) : null;
 if (sharedUrl) {
   urlInput.value = sharedUrl;
   updatePlaylistOption();

@@ -52,7 +52,9 @@ public/
 ```
 
 Flow:
-1. `POST /api/queue {url, name, playlist?}` validates the URL (domain allowlist) and calls
+1. `POST /api/queue {url, name, playlist?}` takes the first link in `url` (`extractUrl`, so
+   pasted share text like "Listen to X on #SoundCloud https://…" works; the client also
+   trims the field to the link on paste), validates it (domain allowlist) and calls
    `YtDlp#resolve`: `yt-dlp -J --flat-playlist` for title/duration. A single track is
    appended as `pending`. For a playlist (YouTube list, SoundCloud set) every usable entry is
    appended, up to `MAX_PLAYLIST_LENGTH` and the free queue space. Entries without title or

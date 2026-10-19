@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import { isAllowedUrl, parseName, parseTrackUrl, ValidationError } from '../server/validate.js';
+import { extractUrl, isAllowedUrl, parseName, parseTrackUrl, ValidationError } from '../server/validate.js';
 
 const yt = ['youtube.com', 'youtu.be'];
 
@@ -45,4 +45,16 @@ test('isAllowedUrl checks the allowlist without throwing', () => {
   assert.equal(isAllowedUrl('https://on.soundcloud.com/abc', domains), true);
   assert.equal(isAllowedUrl('https://example.com/x', domains), false);
   assert.equal(isAllowedUrl(undefined, domains), false);
+});
+
+test('extractUrl finds the link in shared text', () => {
+  const shared = 'Hör dir TWISTED von CHIKARA an auf #SoundCloud\nhttps://on.soundcloud.com/JKGE1CtxSI1m5Ao15L';
+  assert.equal(extractUrl(shared), 'https://on.soundcloud.com/JKGE1CtxSI1m5Ao15L');
+  assert.equal(extractUrl('Watch this: https://youtu.be/abc.'), 'https://youtu.be/abc');
+  assert.equal(extractUrl('(https://youtu.be/abc?t=5)'), 'https://youtu.be/abc?t=5');
+  assert.equal(extractUrl('  no link here '), 'no link here');
+  assert.equal(
+    parseTrackUrl(shared, ['soundcloud.com']),
+    'https://on.soundcloud.com/JKGE1CtxSI1m5Ao15L',
+  );
 });
