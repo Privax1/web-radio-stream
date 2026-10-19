@@ -189,3 +189,43 @@ test('a finished track moves on to the next one', async (t) => {
 
   assert.equal(station.state().nowPlaying.id, b.id);
 });
+
+test('finished and skipped tracks go to the history, newest first', async (t) => {
+  const { queue, broadcaster, station, track } = await setup();
+  t.after(() => station.stop());
+  assert.deepEqual(station.state().history, []);
+  const b = queue.add({ url: 'https://youtu.be/b', title: 'B', duration: 100, addedBy: 'Sam' });
+  await settle();
+
+  broadcaster.finish();
+  await settle();
+  await settle();
+  station.skip(b.id);
+  await settle();
+  await settle();
+
+  const history = station.state().history;
+  assert.deepEqual(history.map((h) => h.id), [b.id, track.id]);
+  assert.equal(history[0].addedBy, 'Sam');
+  assert.equal(typeof history[0].playedAt, 'number');
+  assert.equal('file' in history[0], false);
+});
+
+test('the history is capped at historyLength', async (t) => {
+  const queue = new Queue({ maxLength: 10 });
+  const broadcaster = new FakeBroadcaster();
+  const ytdlp = { downloadAudio: async (_url, dir, name) => `${dir}/${name}.m4a` };
+  const station = new Station({
+    queue, broadcaster, ytdlp, cacheDir: '/nonexistent', stationName: 'T', liveDelayMs: 0, historyLength: 2,
+  });
+  station.start();
+  t.after(() => station.stop());
+  for (const title of ['a', 'b', 'c']) queue.add({ url: `https://youtu.be/${title}`, title, duration: 10 });
+  for (let i = 0; i < 3; i++) {
+    for (let j = 0; j < 6; j++) await settle();
+    broadcaster.finish();
+  }
+  for (let j = 0; j < 4; j++) await settle();
+
+  assert.deepEqual(station.state().history.map((h) => h.title), ['c', 'b']);
+});

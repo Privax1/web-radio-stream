@@ -134,10 +134,13 @@ input:focus { outline: 2px solid var(--accent); outline-offset: 0; }
   object-fit: cover;
   background: var(--surface-2);
 }
+.queue li:not(:has(> .thumb)) { grid-template-columns: 1fr auto; }
+.queue .text { min-width: 0; }
 .queue .title { font-size: .9rem; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .queue .meta { font-size: .75rem; color: var(--muted); }
-.queue .remove { width: 36px; height: 36px; border-radius: 50%; color: var(--muted); }
-.queue .remove svg { width: 20px; height: 20px; }
+.queue .remove, .queue .requeue { width: 36px; height: 36px; border-radius: 50%; color: var(--muted); }
+.queue .remove svg, .queue .requeue svg { width: 20px; height: 20px; }
+.queue .requeue:hover { color: var(--text); }
 
 /* --- Seeking --- */
 
@@ -204,3 +207,22 @@ button.pill.active { background: var(--accent); color: var(--accent-text); }
 .link { color: var(--muted); text-decoration: underline; font-size: .8rem; }
 
 .eyebrow.paused { color: var(--accent); }
+
+/* --- History --- */
+
+.history summary { cursor: pointer; list-style: none; }
+.history summary::-webkit-details-marker { display: none; }
+.history summary h3 { display: inline-flex; align-items: center; gap: 6px; margin: 0; }
+.history summary h3::before { content: "▸"; color: var(--muted); transition: transform .15s; }
+.history[open] summary h3::before { transform: rotate(90deg); }
+.history[open] summary { margin-bottom: 8px; }
+.history li { opacity: .85; }
+
+/* --- Settings / options --- */
+
+.option { margin-top: 10px; font-size: .875rem; color: var(--muted); }
+.option[hidden] { display: none; }
+.settings { display: flex; justify-content: center; font-size: .875rem; color: var(--muted); }
+
+/* Cover images turned off: no artwork box at all. */
+.no-covers .cover { display: none; }

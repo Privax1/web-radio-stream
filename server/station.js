@@ -25,6 +25,11 @@ export class Station extends EventEmitter {
    * so controls are heard almost immediately instead of after the buffer plays out.
    */
   epoch = 0;
+  /**
+   * Tracks that finished or were skipped, newest first, with the time they started (`playedAt`).
+   * @type {Array<import('./queue.js').Track & {playedAt: number}>}
+   */
+  history = [];
   #downloading = false;
   #running = false;
   #skipRequested = false;
@@ -38,7 +43,7 @@ export class Station extends EventEmitter {
    * @param {import('./broadcaster.js').Broadcaster} deps.broadcaster
    * @param {import('./ytdlp.js').YtDlp} deps.ytdlp
    */
-  constructor({ queue, broadcaster, ytdlp, cacheDir, stationName, liveDelayMs }) {
+  constructor({ queue, broadcaster, ytdlp, cacheDir, stationName, liveDelayMs, historyLength = 50 }) {
     super();
     this.queue = queue;
     this.broadcaster = broadcaster;
@@ -46,6 +51,7 @@ export class Station extends EventEmitter {
     this.cacheDir = cacheDir;
     this.stationName = stationName;
     this.liveDelayMs = liveDelayMs;
+    this.historyLength = historyLength;
 
     queue.on('change', () => {
       this.#downloadNext();
@@ -133,6 +139,7 @@ export class Station extends EventEmitter {
       epoch: this.epoch,
       nowPlaying: now ? { ...pub(now), startedAt: now.startedAt, position: now.position } : null,
       queue: this.queue.tracks.map(pub),
+      history: this.history.map((t) => ({ ...pub(t), playedAt: t.playedAt })),
     };
   }
 
@@ -164,7 +171,9 @@ export class Station extends EventEmitter {
       }
 
       console.log(`[station] now playing "${track.title}"`);
+      const playedAt = Date.now();
       await this.#playTrack(track);
+      this.#addToHistory(track, playedAt);
       this.#deleteFile(track.file);
       this.current = null;
       this.emit('change');
@@ -262,6 +271,12 @@ export class Station extends EventEmitter {
       this.#downloading = false;
       this.#downloadNext();
     }
+  }
+
+  #addToHistory(track, playedAt) {
+    if (this.historyLength <= 0) return;
+    this.history.unshift({ ...track, file: null, playedAt });
+    this.history.length = Math.min(this.history.length, this.historyLength);
   }
 
   #deleteFile(file) {

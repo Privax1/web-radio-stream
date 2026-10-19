@@ -32,8 +32,12 @@ export const config = {
 
   maxQueueLength: int('MAX_QUEUE_LENGTH', 100),
   maxTrackSeconds: int('MAX_TRACK_SECONDS', 30 * 60),
+  // Most tracks taken from one playlist link (also limited by the free space in the queue).
+  maxPlaylistLength: int('MAX_PLAYLIST_LENGTH', 50),
+  // Played tracks kept in the "Recently played" list.
+  historyLength: int('HISTORY_LENGTH', 50),
   // Hostnames (and their subdomains) that may be queued. Set to "*" to allow anything yt-dlp supports.
-  allowedDomains: list('ALLOWED_DOMAINS', 'youtube.com,youtu.be'),
+  allowedDomains: list('ALLOWED_DOMAINS', 'youtube.com,youtu.be,soundcloud.com'),
 
   ffmpegBin: process.env.FFMPEG_BIN ?? 'ffmpeg',
   ytdlpBin: process.env.YTDLP_BIN ?? 'yt-dlp',
