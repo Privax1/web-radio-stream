@@ -27,7 +27,7 @@ services:
       - homepage.group=Media
       - homepage.name=Web-Radio
       - homepage.icon=youtube-music.png
-      - homepage.href=https://radio.privax.ipv64.de:12012
+      - homepage.href=${APP_URI}
 volumes:
   radio-cache:
 networks:
